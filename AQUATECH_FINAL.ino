@@ -5,6 +5,7 @@
 #include "addons/RTDBHelper.h"
 #include <DallasTemperature.h>
 #include <PubSubClient.h> //library for MQTT
+#include <ESP32Servo.h>
 
 
 #define WIFI_SSID "B0DAK YELL0W"
@@ -16,6 +17,8 @@
 #define echoPin 26               // CHANGE PIN NUMBER HERE IF YOU WANT TO USE A DIFFERENT PIN
 #define trigPin 27              // CHANGE PIN NUMBER HERE IF YOU WANT TO USE A DIFFERENT PIN
 #define RELAY_PIN 18            // PUMP  1
+#define RELAY_PIN2 19            // PUMP 2
+#define SERVO_PIN 2             // SERVO MOTOR
 
 FirebaseData fbdo;
 FirebaseAuth auth;
@@ -39,11 +42,15 @@ int pH_Value;
 //for water changing mechanism 
 long duration, distance;
 
+//for servo motor
+
+int pos = 0; 
 
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
 WiFiClient espClient;
 PubSubClient client(espClient);
+Servo servoMotor;
 
 unsigned long last_time = 0;
 unsigned long Delay = 30000;
@@ -59,7 +66,9 @@ void reconnect() {
       Serial.println("MQTT connected");
  
       client.subscribe("aquatech/pump");
-      Serial.println("Topic Subscribed");
+      client.subscribe("aquatech/servo");
+      Serial.println("Successfully subscribed to topics.");
+     
     }
     else {
       Serial.print("failed, rc=");
@@ -91,10 +100,24 @@ void callback(char*topic, byte* payload, unsigned int length)
 
   if (data == "1") { //THIS WILL TAKE WATER FROM THE TANK
       digitalWrite(RELAY_PIN, LOW);
-      Serial.println("Received message. Turning the relay on.");
+      Serial.println("Received message. Pumping out water from tank.");
       }
 
- 
+  if(data=="2")
+  {
+        for (pos = 0; pos <= 180; pos += 1) 
+        { 
+          servoMotor.write(pos); 
+          delay(10);  
+        }          
+
+        for (pos = 180; pos >= 0; pos -= 1) 
+        { 
+         servoMotor.write(pos);   
+          delay(10);             
+        }
+  }
+
 }
 
 void setup() {
@@ -102,7 +125,7 @@ void setup() {
   client.setServer(mqttServer, 1883); //setting MQTT server
   client.setCallback(callback);
   
-  Serial.begin(115200);
+  Serial.begin(9600);
   sensors.begin();
   
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
@@ -131,8 +154,11 @@ void setup() {
   pinMode(pH_Value, INPUT); 
   pinMode(RELAY_PIN, OUTPUT);
   digitalWrite(RELAY_PIN, HIGH);
+  digitalWrite(RELAY_PIN2, HIGH);
   pinMode(trigPin, OUTPUT);
   pinMode(echoPin, INPUT);
+  servoMotor.setPeriodHertz(50); // PWM frequency for SG90
+  servoMotor.attach(SERVO_PIN, 500, 2400); // Minimum and maximum pulse width (in µs) to go from 0° to 180
 }
 
 
@@ -162,10 +188,23 @@ void loop() {
 
       
       if (distance >= 15 ) {
-      Serial.println("Distance is greater or equal to 30cm. Turning the relay off.");
+      Serial.println("Distance is greater or equal to 15cm. Pump will now stop taking out water.");
       digitalWrite(RELAY_PIN, HIGH);
       }
-  
+
+      delay(3000);
+      
+      if (distance == 15 ) {
+      Serial.println("Distance is equal to 15cm. Pump will now start refilling tank.");
+      digitalWrite(RELAY_PIN2, LOW);
+      }
+
+      if (distance <= 3 ) {
+      Serial.println("Distance is greater or equal to 3cm. Pump will now stop refilling tank.");
+      digitalWrite(RELAY_PIN2, HIGH);
+      }
+
+    
       
     // WATER TEMPERATURE CODE:
     sensors.requestTemperatures();
