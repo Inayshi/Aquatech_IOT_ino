@@ -4,7 +4,6 @@
 #include "addons/TokenHelper.h"
 #include "addons/RTDBHelper.h"
 #include <DallasTemperature.h>
-#include <PubSubClient.h> //library for MQTT
 #include <ESP32Servo.h>
 
 
@@ -25,14 +24,6 @@ FirebaseAuth auth;
 FirebaseConfig config;
 
 
-
-const char* mqttServer = "broker.emqx.io"; //MQTT URL
-const char* mqttUserName = "aquatech";  // MQTT username
-const char* mqttPwd = "aquatech_iot";  // MQTT password
-const char* clientID = "aquatechIOT"; // client id username+0001
-const char* topic = "aquatech/pump"; //publish topic
-
-
 //for sensors
 unsigned long sendDataPrevMillis = 0; // Corrected the variable declaration
 bool signupOK = false;
@@ -49,83 +40,12 @@ int pos = 0;
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
 WiFiClient espClient;
-PubSubClient client(espClient);
 Servo servoMotor;
 
-unsigned long last_time = 0;
-unsigned long Delay = 30000;
-//parameters for using non-blocking delay
-unsigned long previousMillis = 0;
-const long interval = 5000;
- 
-String msgStr = "";      // MQTT message buffer
-
-void reconnect() {
-  while (!client.connected()) {  
-    if (client.connect(clientID, mqttUserName, mqttPwd)) {
-      Serial.println("MQTT connected");
- 
-      client.subscribe("aquatech/pump");
-      client.subscribe("aquatech/servo");
-      Serial.println("Successfully subscribed to topics.");
-     
-    }
-    else {
-      Serial.print("failed, rc=");
-      Serial.print(client.state());
-      Serial.println(" try again in 5 seconds");
-      delay(5000);  // wait 5sec and retry
-    }
-  }
-}
-
-void callback(char*topic, byte* payload, unsigned int length) 
-{
-  Serial.print("Message arrived in topic: ");
-  Serial.println(topic);
-  Serial.print("Message:");
-  String data = "";
-
-  for (int i = 0; i < length; i++) {
-    Serial.print((char)payload[i]);
-    data += (char)payload[i];
-  }
-
-  Serial.println();
-  Serial.print("Message size :");
-  Serial.println(length);
-  Serial.println();
-  Serial.println("-----------------------");
-  Serial.println(data);
-
-  if (data == "1") { //THIS WILL TAKE WATER FROM THE TANK
-      digitalWrite(RELAY_PIN, LOW);
-      Serial.println("Received message. Pumping out water from tank.");
-      }
-
-  if(data=="2")
-  {
-        for (pos = 0; pos <= 180; pos += 1) 
-        { 
-          servoMotor.write(pos); 
-          delay(10);  
-        }          
-
-        for (pos = 180; pos >= 0; pos -= 1) 
-        { 
-         servoMotor.write(pos);   
-          delay(10);             
-        }
-  }
-
-}
 
 void setup() {
-
-  client.setServer(mqttServer, 1883); //setting MQTT server
-  client.setCallback(callback);
   
-  Serial.begin(9600);
+  Serial.begin(115200);
   sensors.begin();
   
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
@@ -165,17 +85,15 @@ void setup() {
  
 void loop() {
  
-  if (!client.connected()) { //if client is not connected
-    reconnect(); //try to reconnect
-  }
-  client.loop();
+ 
   if (Firebase.ready() && signupOK && (millis() - sendDataPrevMillis > 5000 || sendDataPrevMillis == 0)) {
     sendDataPrevMillis = millis();
-
+    
     //PUMP1:
+    
       digitalWrite(trigPin, LOW);
       delayMicroseconds(2);
-      digitalWrite(trigPin, HIGH);
+      digitalWrite(trigPin, HIGH);  
       delayMicroseconds(10);
       digitalWrite(trigPin, LOW);
       
@@ -185,8 +103,17 @@ void loop() {
       Serial.print (distance);
       Serial.print("Distance: ");
       Serial.print(disp);
-
-      
+    
+    
+    if (Firebase.RTDB.get(&fbdo, "/Commands/RELAY")) {
+    if (fbdo.dataTypeEnum() == firebase_rtdb_data_type_string) {
+    String relayValue = fbdo.to<String>();
+    Serial.println(relayValue);
+      if (relayValue == "Relay ON") { //THIS WILL TAKE WATER FROM THE TANK
+      digitalWrite(RELAY_PIN, LOW);
+      Serial.println("Received message. Pumping out water from tank.");
+      }
+  
       if (distance >= 15 ) {
       Serial.println("Distance is greater or equal to 15cm. Pump will now stop taking out water.");
       digitalWrite(RELAY_PIN, HIGH);
@@ -203,7 +130,31 @@ void loop() {
       Serial.println("Distance is greater or equal to 3cm. Pump will now stop refilling tank.");
       digitalWrite(RELAY_PIN2, HIGH);
       }
+    }
+   }
 
+    //SERVO MOTOR:
+    if (Firebase.RTDB.get(&fbdo, "/Commands/SERVO")) {
+    if (fbdo.dataTypeEnum() == firebase_rtdb_data_type_string) {
+    String servoValue = fbdo.to<String>();
+    Serial.println(servoValue);      
+    if(servoValue=="Servo ON"){
+     Serial.println("Received message. Dispensing the pH balancers.");
+       for (pos = 0; pos <= 90; pos += 1) 
+       { 
+          servoMotor.write(pos); 
+          delay(10);  
+        }          
+
+       for (pos = 90; pos >= 0; pos -= 1) 
+      { 
+         servoMotor.write(pos);   
+         delay(10);             
+       }
+    }
+    }
+    
+      
     
       
     // WATER TEMPERATURE CODE:
@@ -248,7 +199,5 @@ void loop() {
   }
   delay(5000);
 }
-
-float readTemperature() {
-  float WATER_TEMP = sensors.getTempCByIndex(0);
 }
+    
